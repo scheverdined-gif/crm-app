@@ -1,0 +1,5 @@
+{
+  "VITE_CRM_STORAGE": "supabase",
+  "VITE_SUPABASE_URL": "https://huywyjtskwlddjztpsyl.supabase.co",
+  "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_uayZQCxQWe5flruuqHLx_w_Q03MpwKj"
+}

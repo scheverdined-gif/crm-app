@@ -1,0 +1,26 @@
+{
+  "name": "extreme-kids-crm",
+  "version": "2.2.3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/start.mjs",
+    "dev": "vite --host 127.0.0.1 --port 5192 --strictPort",
+    "build": "node scripts/build.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "lucide-react": "0.468.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "playwright": "1.62.1",
+    "vite": "6.4.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
