@@ -1,0 +1,13 @@
+import {writeFile,readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+import {publicSettings} from './public-settings.mjs';
+const root=new URL('../',import.meta.url),settings=publicSettings(root);
+const {build}=await import('vite');
+await build({root:fileURLToPath(root)});
+const html=await readFile(new URL('dist/index.html',root),'utf8');
+const assets=[...html.matchAll(/(?:src|href)="\.\/([^"?]+)"/g)].map(m=>m[1]);
+if(!assets.some(p=>p.endsWith('.js')))throw new Error('Не найден собранный JavaScript приложения');
+const hashes=Object.fromEntries(await Promise.all(['index.html',...assets].map(async name=>[name,createHash('sha256').update(await readFile(new URL('dist/'+name,root))).digest('hex')])));
+await writeFile(new URL('dist/BUILD-INFO.json',root),JSON.stringify({version:'2.2.3',storage:'supabase',project_url:settings.VITE_SUPABASE_URL,public_settings_sha256:createHash('sha256').update(JSON.stringify(settings)).digest('hex'),assets:hashes},null,2)+'\n');
+console.log('CRM 2.2.3: сборка подключена к существующему Supabase.');
