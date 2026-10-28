@@ -1,2 +1,7 @@
 node_modules
 dist
+.env
+.env.*
+.playwright-browsers
+artifacts/
+test-results/
