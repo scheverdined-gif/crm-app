@@ -40,9 +40,12 @@ export function createSupabaseStorage(config, clientFactory=createClient) {
       if(error){globalThis.localStorage?.removeItem(storageKey);client.auth.stopAutoRefresh();throw new Error('Вы вышли на этом устройстве. Supabase недоступен для подтверждения выхода');}
     },
     async mutate(command,payload,state) {
-      const {data,error}=await client.rpc('crm_mutate',{p_command:command,p_payload:toPayload(payload),p_expected:payload.__expected || expectedVersions(state)});
+      const args={p_payload:toPayload(payload),p_expected:payload.__expected || expectedVersions(state)};
+      const {data,error}=await client.rpc(command==='sessions_delete'?'crm_delete_session_scope':'crm_mutate',
+        command==='sessions_delete'?args:{p_command:command,...args});
       if (error) {
-        const e=new Error(error.code==='40001' ? 'Данные изменены другим сотрудником. Проверьте изменения и откройте форму заново' : error.message || 'Сохранение не подтверждено. Обновите данные перед повтором');
+        const e=new Error(error.code==='40001' ? 'Данные изменены другим сотрудником. Проверьте изменения и откройте форму заново' :
+          command==='sessions_delete' && ['PGRST202','42883'].includes(error.code) ? 'Удаление серии ещё не подключено: требуется SQL-миграция 2026102801. Данные не удалены' : error.message || 'Сохранение не подтверждено. Обновите данные перед повтором');
         e.code=error.code; throw e;
       }
       if (!data?.ok) throw new Error('Сервер не подтвердил сохранение');

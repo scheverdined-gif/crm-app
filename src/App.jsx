@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from "react";
 import {
   Zap, Users, Calendar, TrendingUp, Search, Plus, ChevronRight,
   ChevronLeft, Clock, MapPin, Star, AlertCircle, CheckCircle2,
   X, Filter, BarChart3, UserCircle2, Footprints, Bike,
-  Settings, LogOut, Menu, ArrowUpRight, Award, Target
+  Settings, LogOut, Menu, ArrowUpRight, Award, Target, Sun, Moon
 } from "lucide-react";
 
 import { directionsOf, presentIds, attendancePercent, finalizeSession, promoStats, matchesStudent, weekStats, canEditSession, needsAttention, reconcilePromoStudent, formatAttendance, isArchived, archiveStudent, attendanceSelection, removeSessionFromState, repairMissingPromoSources, canSelectStudentForSession, averageSessionAttendance, childKey, uniqueChildren, migrateSchoolData, validateEnrollment, validateSessionRoster, coachStudents, updateEnrollment, patchEnrollment, uniqueBranchChildren, directionAttendanceStats, updateSessionInState, studentFilterCoaches, SALARY_RATES, sessionEarning, calcCoachSalary } from "./crmLogic.js";
@@ -12,6 +12,9 @@ import { storageConfig, createSupabaseStorage } from "./storage/supabase.js";
 import { useRemoteSchool } from "./storage/useRemoteSchool.js";
 import { coachDirections } from "./storage/model.js";
 import { suggestedSessionName, groupNameSuggestions } from "./sessionUi.js";
+import {localIsoDate as todayIso,useLocalToday,useCalendarSelection} from "./calendar.js";
+import {THEME_KEY,THEME_CSS,readTheme,storeTheme,themedCss} from "./theme.js";
+import {seriesSelection,hasSessionHistory} from "./series.js";
 const SERVER_MODE = import.meta.env.VITE_CRM_STORAGE === "supabase";
 let STORAGE = null, CONFIG_ERROR = "";
 try { const config = storageConfig(import.meta.env); if(config.mode === "supabase") STORAGE = createSupabaseStorage(config); }
@@ -21,13 +24,13 @@ catch(error) { CONFIG_ERROR = error.message; }
    ДИСЦИПЛИНЫ — каждая со своим неоновым акцентом, как цвет деки
    ============================================================ */
 // Сегодня — локальная дата браузера. Исходные демонстрационные занятия остаются в июне 2026.
-const TODAY_ISO = new Date().toLocaleDateString("sv-SE");
+
 
 // Статус ученика: активен / в отпуске / ушёл. В "живые" счётчики попадают все, кроме ушедших.
 const STUDENT_STATUS = {
-  active:   { label: "Активен",   color: "#3DDC97" },
-  vacation: { label: "В отпуске", color: "#FFC24B" },
-  left:     { label: "Неактивен",      color: "#FF5454" },
+  active:   { label: "Активен",   color: "var(--crm-green)" },
+  vacation: { label: "В отпуске", color: "var(--crm-amber)" },
+  left:     { label: "Неактивен",      color: "var(--crm-danger)" },
 };
 // Типы тренировок: групповая, индивидуальная, спортивная группа и промо — у каждого фиксированная длительность
 const SESSION_TYPES = {
@@ -44,8 +47,8 @@ function monthKey(iso) { return typeof iso === "string" ? iso.slice(0, 7) : null
 function monthLabelShort(key) {
   return new Date(key + "-01T00:00:00").toLocaleDateString("ru-RU", { month: "short" }).replace(".", "");
 }
-// последние N календарных месяцев по TODAY_ISO, для графика притока/оттока
-function lastMonthKeys(n, endMonth = TODAY_ISO.slice(0, 7)) {
+// последние N календарных месяцев по todayIso(), для графика притока/оттока
+function lastMonthKeys(n, endMonth = todayIso().slice(0, 7)) {
   const [y, m] = endMonth.split("-").map(Number);
   const keys = [];
   for (let i = n - 1; i >= 0; i--) {
@@ -66,12 +69,12 @@ function buildFlowStats(studentList, months = 6, endMonth) {
 }
 
 const DISCIPLINES = {
-  balance: { label: "Беговел", short: "БЕГ", color: "#FF8A3D", icon: "bike" },
-  rollers: { label: "Ролики", short: "РОЛ", color: "#FF3D8A", icon: "skate" },
-  skate:   { label: "Скейт",  short: "СКТ", color: "#FFC83D", icon: "board" },
-  bike:    { label: "Велик",  short: "ВЕЛ", color: "#3DDC97", icon: "bike" },
-  bmx:     { label: "BMX",    short: "BMX", color: "#3DA5FF", icon: "bmx" },
-  scooter: { label: "Самокат",short: "САМ", color: "#B14DFF", icon: "scooter" },
+  balance: { label: "Беговел", short: "БЕГ", color: "var(--crm-orange)", icon: "bike" },
+  rollers: { label: "Ролики", short: "РОЛ", color: "var(--crm-rollers)", icon: "skate" },
+  skate:   { label: "Скейт",  short: "СКТ", color: "var(--crm-skate)", icon: "board" },
+  bike:    { label: "Велик",  short: "ВЕЛ", color: "var(--crm-green)", icon: "bike" },
+  bmx:     { label: "BMX",    short: "BMX", color: "var(--crm-blue)", icon: "bmx" },
+  scooter: { label: "Самокат",short: "САМ", color: "var(--crm-purple)", icon: "scooter" },
 };
 
 /* ============================================================
@@ -91,8 +94,8 @@ function monthLabelFull(m) {
    ФИЛИАЛЫ
    ============================================================ */
 const BRANCHES = {
-  roza:    { label: "Роза",      short: "РОЗ", color: "#FF8A3D" },
-  irkutsk: { label: "Иркутский", short: "ИРК", color: "#3DCFFF" },
+  roza:    { label: "Роза",      short: "РОЗ", color: "var(--crm-orange)" },
+  irkutsk: { label: "Иркутский", short: "ИРК", color: "var(--crm-cyan)" },
 };
 
 /* ============================================================
@@ -114,7 +117,7 @@ const SESSIONS = [];
    ИКОНКИ ДИСЦИПЛИН (мини SVG-значки в духе деки/наклейки)
    ============================================================ */
 function DisciplineGlyph({ d, size = 16 }) {
-  const c = DISCIPLINES[d]?.color || "#888";
+  const c = DISCIPLINES[d]?.color || "var(--crm-grey)";
   const icons = {
     bmx: <Bike size={size} color={c} strokeWidth={2.5} />,
     bike: <Bike size={size} color={c} strokeWidth={2.5} />,
@@ -248,6 +251,16 @@ function useStoredState(key, initial, disabled = false) {
 }
 
 export default function App() {
+  const [theme,setTheme]=useState(()=>readTheme());
+  const [themeError,setThemeError]=useState(false);
+  useLayoutEffect(()=>{document.documentElement.dataset.crmTheme=theme;setThemeError(!storeTheme(theme));},[theme]);
+  useEffect(()=>{const sync=e=>{if(e.key===THEME_KEY)setTheme(e.newValue==='light'?'light':'dark');};window.addEventListener('storage',sync);return()=>window.removeEventListener('storage',sync);},[]);
+  return <><style>{THEME_CSS}</style><button className="theme-toggle" aria-label={theme==='dark'?'Включить светлую тему':'Включить тёмную тему'} onClick={()=>setTheme(t=>t==='dark'?'light':'dark')}>
+    {theme==='dark'?<Sun size={16}/>:<Moon size={16}/>} <span>{theme==='dark'?'Светлая тема':'Тёмная тема'}</span>
+  </button>{themeError&&<div className="theme-notice" role="status">Браузер не разрешил сохранить тему</div>}<SchoolApp/></>;
+}
+
+function SchoolApp() {
   const remote = useRemoteSchool(STORAGE);
   const pendingSeries = useRef(new Map());
   const [localUser, setCurrentUser] = useState(null);
@@ -390,7 +403,7 @@ export default function App() {
 
   async function addStudent(payload) {
     if (!canWrite) return;
-    const s = { id: nextId("s"), attendance: null, lastNote: "", joinDate: TODAY_ISO, status: "active", origin: "promo", ...payload, childId:payload.childId || nextId("child") };
+    const s = { id: nextId("s"), attendance: null, lastNote: "", joinDate: todayIso(), status: "active", origin: "promo", ...payload, childId:payload.childId || nextId("child") };
     validateEnrollment(students, s);
     if(STORAGE) {await remote.mutate("student_create",s);flashToast("Ученик сохранён");return;}
     setStudents(prev => [s, ...prev]);
@@ -415,8 +428,8 @@ export default function App() {
 
   async function deleteStudent(id) {
     if (!canWrite) return;
-    if(STORAGE) {await remote.mutate("student_archive",{id,archivedAt:TODAY_ISO});if(selectedStudent?.id===id)setSelectedStudent(null);flashToast("Ученик перенесён в архив");return;}
-    setStudents(prev => prev.map(s => s.id === id ? archiveStudent(s, TODAY_ISO) : s));
+    if(STORAGE) {await remote.mutate("student_archive",{id,archivedAt:todayIso()});if(selectedStudent?.id===id)setSelectedStudent(null);flashToast("Ученик перенесён в архив");return;}
+    setStudents(prev => prev.map(s => s.id === id ? archiveStudent(s, todayIso()) : s));
     // Сохраняем все составы, посещения и результаты для истории и начислений.
     if (selectedStudent?.id === id) setSelectedStudent(null);
     flashToast("Ученик перенесён в архив; история сохранена");
@@ -468,6 +481,7 @@ export default function App() {
   }
 
   function requestDelete(kind, id, label) {
+    if(kind==='session' && !canEditSession(permittedUser,sessions.find(s=>s.id===id)))return;
     if (kind === "coach") {
       const hasStudents = students.some(s => coachesOfStudent(s).includes(id));
       const hasSessions = sessions.some(s => s.coachId === id);
@@ -511,13 +525,13 @@ export default function App() {
     setAdminTab("overview");
   }
 
-  if(CONFIG_ERROR) return <div className="root"><style>{CSS}</style><div className="login-error" role="alert">{CONFIG_ERROR}</div></div>;
-  if(STORAGE && remote.loading && !currentUser) return <div className="root"><style>{CSS}</style><div className="login-shell" role="status">Загрузка CRM…</div></div>;
+  if(CONFIG_ERROR) return <div className="root"><style>{THEMED_CSS}</style><div className="login-error" role="alert">{CONFIG_ERROR}</div></div>;
+  if(STORAGE && remote.loading && !currentUser) return <div className="root"><style>{THEMED_CSS}</style><div className="login-shell" role="status">Загрузка CRM…</div></div>;
   // Не авторизован — только экран входа
   if (!currentUser) {
     return (
       <div className="root">
-        <style>{CSS}</style>
+        <style>{THEMED_CSS}</style>
         <LoginScreen coaches={coaches} managers={managers} onLogin={setCurrentUser} remoteLogin={STORAGE ? remote.login : null} remoteError={remote.error} onRefresh={() => remote.refresh().catch(()=>{})} />
       </div>
     );
@@ -534,9 +548,9 @@ export default function App() {
 
   return (
     <div className="root">
-      <style>{CSS}</style>
+      <style>{THEMED_CSS}</style>
 
-      {STORAGE && <div className="server-status" role="status" style={{padding:"8px 16px",fontSize:12,color:"#9FA6B2"}}>Общая база · {remote.busy ? "Сохранение…" : "Supabase"}<button className="modal-btn-secondary" disabled={remote.busy} onClick={() => remote.refresh().catch(()=>{})}>Обновить данные</button></div>}
+      {STORAGE && <div className="server-status" role="status" style={{padding:"8px 16px",fontSize:12,color:"var(--crm-grey-extra)"}}>Общая база · {remote.busy ? "Сохранение…" : "Supabase"}<button className="modal-btn-secondary" disabled={remote.busy} onClick={() => remote.refresh().catch(()=>{})}>Обновить данные</button></div>}
       {STORAGE && remote.error && <div className="storage-error" role="alert">{remote.error}</div>}
       {storageError && <div className="storage-error" role="alert">Не удалось сохранить изменения в браузере. Не закрывайте страницу, пока не освободите место.</div>}
       {toast && <div className="toast"><CheckCircle2 size={14} />{toast}</div>}
@@ -676,7 +690,15 @@ export default function App() {
           onSave={async (payload) => { await saveManager(editingManager.id, payload); setEditingManager(null); }}
         />
       )}
-      {confirmDelete && (
+      {confirmDelete?.kind === "session" && <SessionDeleteDialog
+        anchor={sessions.find(s=>s.id===confirmDelete.id)} sessions={sessions}
+        versions={STORAGE ? remote.versions : null} onCancel={()=>setConfirmDelete(null)}
+        onConfirm={async payload=>{
+          if(STORAGE)await remote.mutate('sessions_delete',payload);
+          else setSchool(prev=>({...prev,sessions:prev.sessions.filter(s=>!payload.sessionIds.includes(s.id))}));
+          setSelectedSession(null);setConfirmDelete(null);flashToast(`Удалено тренировок: ${payload.sessionIds.length}`);
+        }}/>}
+      {confirmDelete && confirmDelete.kind !== "session" && (
         <ConfirmDialog
           label={confirmDelete.label}
           archive={confirmDelete.kind === "student"}
@@ -707,7 +729,7 @@ function CoachView({ versions, coach, coaches, students, sessions, session, setS
   const effectiveBranch = activeBranch;
 
   const mySessions = sessions.filter(s => s.coachId === coach.id && s.branchId === effectiveBranch);
-  const [selectedDate, setSelectedDate] = useState(TODAY_ISO);
+  const [selectedDate, setSelectedDate] = useCalendarSelection();
   const myStudents = coachStudents(students, sessions, coach.id).filter(s => s.branchId === effectiveBranch);
 
   if (session) return (
@@ -768,7 +790,7 @@ function CoachView({ versions, coach, coaches, students, sessions, session, setS
 
           <div className="diary-title-stamp">
             <span>ДНЕВНИК ТРЕНИРОВОК</span>
-            <span className="diary-date">{BRANCHES[effectiveBranch].label} · {new Date(TODAY_ISO + "T00:00:00").toLocaleDateString("ru-RU")}</span>
+            <span className="diary-date">{BRANCHES[effectiveBranch].label} · {new Date(todayIso() + "T00:00:00").toLocaleDateString("ru-RU")}</span>
           </div>
         </header>
 
@@ -800,7 +822,7 @@ function CoachView({ versions, coach, coaches, students, sessions, session, setS
         </main>
 
         <button className="fab" style={{ background: disc.color }} onClick={onNewSession} aria-label="Новая тренировка">
-          <Plus size={24} color="#16181C" strokeWidth={3} />
+          <Plus size={24} color="var(--crm-surface)" strokeWidth={3} />
         </button>
       </div>
     </div>
@@ -808,14 +830,14 @@ function CoachView({ versions, coach, coaches, students, sessions, session, setS
 }
 
 function TodayTab({ coachSessions, selectedDate, setSelectedDate, onOpen, disc }) {
-  const isToday = selectedDate === TODAY_ISO;
+  const isToday = selectedDate === todayIso();
   const markedDates = useMemo(() => new Set(coachSessions.map(s => s.date)), [coachSessions]);
   const daySessions = coachSessions
     .filter(s => s.date === selectedDate)
     .sort((a, b) => a.time.localeCompare(b.time));
 
   const past = coachSessions
-    .filter(s => s.date < TODAY_ISO)
+    .filter(s => s.date < todayIso())
     .sort((a, b) => (a.date === b.date ? b.time.localeCompare(a.time) : b.date.localeCompare(a.date)));
 
   return (
@@ -876,6 +898,7 @@ function buildMonthCells(yearMonth) {
 }
 
 function DateCalendarNav({ selectedDate, onSelect, markedDates }) {
+  const today=useLocalToday();
   const [open, setOpen] = useState(false);
   const [viewMonth, setViewMonth] = useState(selectedDate.slice(0, 7));
 
@@ -906,7 +929,7 @@ function DateCalendarNav({ selectedDate, onSelect, markedDates }) {
         <button className="date-nav-arrow" onClick={() => onSelect(shiftIsoDate(selectedDate, -1))} aria-label="Предыдущий день">
           <ChevronLeft size={16} />
         </button>
-        <button className="date-nav-label" onClick={toggleOpen}>
+        <button className="date-nav-label" aria-label="Открыть календарь" aria-expanded={open} onClick={toggleOpen}>
           <Calendar size={13} />
           <span>{label}</span>
           <span className="date-nav-weekday">{weekdayLabel}</span>
@@ -914,8 +937,8 @@ function DateCalendarNav({ selectedDate, onSelect, markedDates }) {
         <button className="date-nav-arrow" onClick={() => onSelect(shiftIsoDate(selectedDate, 1))} aria-label="Следующий день">
           <ChevronRight size={16} />
         </button>
-        {selectedDate !== TODAY_ISO && (
-          <button className="date-nav-today" onClick={() => pick(TODAY_ISO)}>Сегодня</button>
+        {selectedDate !== today && (
+          <button className="date-nav-today" onClick={() => pick(today)}>Сегодня</button>
         )}
       </div>
 
@@ -935,10 +958,10 @@ function DateCalendarNav({ selectedDate, onSelect, markedDates }) {
               const iso = `${viewMonth}-${String(d).padStart(2, "0")}`;
               const cls = ["date-calendar-cell"];
               if (iso === selectedDate) cls.push("selected");
-              if (iso === TODAY_ISO) cls.push("is-today");
+              if (iso === today) cls.push("is-today");
               if (markedDates?.has(iso)) cls.push("has-sessions");
               return (
-                <button key={i} className={cls.join(" ")} onClick={() => pick(iso)}>
+                <button key={i} className={cls.join(" ")} aria-label={`Выбрать дату ${iso}`} aria-current={iso === today ? "date" : undefined} aria-pressed={iso === selectedDate} onClick={() => pick(iso)}>
                   {d}
                 </button>
               );
@@ -1023,10 +1046,10 @@ function MonthPicker({value, onChange}) {
 function PromoPanel({sessions}) {
   const stats = promoStats(sessions);
   return <div className="panel"><div className="panel-title">Промо за выбранный месяц</div><div className="stat-grid">
-    <StatBlock label="Закрыто промо-занятий" value={stats.sessions} accent="#FFC24B" />
-    <StatBlock label="Пришли на промо" value={stats.attended} accent="#FFC24B" />
-    <StatBlock label="Купили" value={stats.bought} accent="#3DDC97" />
-    <StatBlock label="Не купили" value={stats.notBought} accent="#FF5454" />
+    <StatBlock label="Закрыто промо-занятий" value={stats.sessions} accent="var(--crm-amber)" />
+    <StatBlock label="Пришли на промо" value={stats.attended} accent="var(--crm-amber)" />
+    <StatBlock label="Купили" value={stats.bought} accent="var(--crm-green)" />
+    <StatBlock label="Не купили" value={stats.notBought} accent="var(--crm-danger)" />
   </div><div className="form-hint">Конверсия (Б без результата не учитывается): {stats.conversion === null ? "—" : stats.conversion + "%"} · Не пришли: {stats.absent} · Результат покупки не указан: {stats.unknown}</div></div>;
 }
 
@@ -1068,8 +1091,8 @@ function StudentsTab({ students, coaches, filterCoaches, onOpen, disc, onNewStud
               <div className="student-row-info">
                 <div className="student-row-name">
                   {s.name}
-                  {s.flag === "injury" && <AlertCircle size={13} color="#FF5454" />}
-                  {(s.origin || "regular") === "promo" && <Star size={12} color="#FFC24B" />}
+                  {s.flag === "injury" && <AlertCircle size={13} color="var(--crm-danger)" />}
+                  {(s.origin || "regular") === "promo" && <Star size={12} color="var(--crm-amber)" />}
                 </div>
                 <div className="student-row-meta">
                   {s.age} лет · {s.level}
@@ -1102,7 +1125,7 @@ function StudentsTab({ students, coaches, filterCoaches, onOpen, disc, onNewStud
 const salaryMoney = amount => Number.isFinite(amount) ? `${amount.toLocaleString("ru-RU")} ₽` : "Не рассчитано";
 function SalaryPanel({ coach, sessions, selectedMonth }) {
   const [open, setOpen] = useState(false);
-  const monthKey = selectedMonth || TODAY_ISO.slice(0, 7);
+  const monthKey = selectedMonth || todayIso().slice(0, 7);
   const monthSessions = sessions
     .filter(s => s.status === "done" && s.date.startsWith(monthKey))
     .sort((a, b) => (a.date === b.date ? b.time.localeCompare(a.time) : b.date.localeCompare(a.date)));
@@ -1151,8 +1174,8 @@ function FlowChart({ students, endMonth }) {
       <div className="panel-title-row">
         <div className="panel-title">Приток / отток учеников</div>
         <div className="flow-legend">
-          <span><i style={{ background: "#3DDC97" }} /> Пришли ({totalIn})</span>
-          <span><i style={{ background: "#FF5454" }} /> Ушли ({totalOut})</span>
+          <span><i style={{ background: "var(--crm-green)" }} /> Пришли ({totalIn})</span>
+          <span><i style={{ background: "var(--crm-danger)" }} /> Ушли ({totalOut})</span>
         </div>
       </div>
       <div className="flow-chart">
@@ -1174,7 +1197,7 @@ function FlowChart({ students, endMonth }) {
 function CoachStatsTab({ coach, students:allStudents, sessions:allSessions, disc }) {
   const students = coachStudents(allStudents, allSessions, coach.id);
   const sessions = allSessions.filter(s => s.coachId === coach.id);
-  const [selectedMonth, setSelectedMonth] = useState(TODAY_ISO.slice(0,7));
+  const [selectedMonth, setSelectedMonth] = useState(todayIso().slice(0,7));
   const monthSessions = sessions.filter(s => s.date.startsWith(selectedMonth));
   const enrolled = students.filter(isEnrolled);
   const avgAttendance = averageSessionAttendance(monthSessions);
@@ -1193,8 +1216,8 @@ function CoachStatsTab({ coach, students:allStudents, sessions:allSessions, disc
       <div className="stat-grid">
         <StatBlock label="Средняя посещаемость" value={avgAttendance === null ? "—" : `${avgAttendance}%`} icon={<Target size={16} />} accent={disc.color} />
         <StatBlock label="Учеников сейчас" value={enrolled.length} icon={<Users size={16} />} accent={disc.color} />
-        <StatBlock label="Проведено" value={done} icon={<CheckCircle2 size={16} />} accent="#3DDC97" />
-        <StatBlock label="Пропущено" value={missed} icon={<AlertCircle size={16} />} accent="#FF5454" />
+        <StatBlock label="Проведено" value={done} icon={<CheckCircle2 size={16} />} accent="var(--crm-green)" />
+        <StatBlock label="Пропущено" value={missed} icon={<AlertCircle size={16} />} accent="var(--crm-danger)" />
       </div>
 
       <SalaryPanel coach={coach} sessions={sessions} selectedMonth={selectedMonth} />
@@ -1205,8 +1228,8 @@ function CoachStatsTab({ coach, students:allStudents, sessions:allSessions, disc
 
       {(promoCount > 0 || leftCount > 0) && (
         <div className="stat-grid">
-          <StatBlock label="С пробного, не переведены" value={promoCount} icon={<Star size={16} />} accent="#FFC24B" />
-          <StatBlock label="Ушли всего" value={leftCount} icon={<AlertCircle size={16} />} accent="#FF5454" />
+          <StatBlock label="С пробного, не переведены" value={promoCount} icon={<Star size={16} />} accent="var(--crm-amber)" />
+          <StatBlock label="Ушли всего" value={leftCount} icon={<AlertCircle size={16} />} accent="var(--crm-danger)" />
         </div>
       )}
 
@@ -1365,7 +1388,7 @@ function SessionDetail({ expectedVersions, session, onBack, students, onEdit, on
                     onChange={() => setPresent(p => ({ ...p, [s.id]: !p[s.id] }))}
                   />
                   <span className="roster-check" style={{ background: present[s.id] ? disc.color : "transparent" }}>
-                    {present[s.id] === null ? "—" : present[s.id] ? <CheckCircle2 size={13} color="#16181C" /> : "Б"}
+                    {present[s.id] === null ? "—" : present[s.id] ? <CheckCircle2 size={13} color="var(--crm-surface)" /> : "Б"}
                   </span>
                   <span className="roster-name">{s.name}{isArchived(s) && <span className="form-hint"> · архив</span>}</span>
                   <span className="roster-level">{present[s.id] === null ? "Не отмечено" : present[s.id] ? "✓ Был" : "Б Не был"}</span>
@@ -1436,7 +1459,7 @@ function StudentDetail({ student, onBack, sessions, coaches, onEdit, onDelete, o
 
   function setStatus(next) {
     if (!onQuickUpdate) return;
-    if (next === "left") onQuickUpdate({ status: "left", leftDate: TODAY_ISO });
+    if (next === "left") onQuickUpdate({ status: "left", leftDate: todayIso() });
     else onQuickUpdate({ status: next });
   }
   function convertToRegular() {
@@ -1446,7 +1469,7 @@ function StudentDetail({ student, onBack, sessions, coaches, onEdit, onDelete, o
   const [commentDraft, setCommentDraft] = useState("");
   async function addComment() {
     if (!commentDraft.trim() || !onQuickUpdate) return;
-    const entry = { id: STORAGE ? crypto.randomUUID() : `cm${Date.now()}`, date: TODAY_ISO, text: commentDraft.trim() };
+    const entry = { id: STORAGE ? crypto.randomUUID() : `cm${Date.now()}`, date: todayIso(), text: commentDraft.trim() };
     if(await onQuickUpdate({ comments: [entry, ...(student.comments || [])] }) === false) return;
     setCommentDraft("");
   }
@@ -1709,7 +1732,7 @@ function AdminTopbar({ searchQ, setSearchQ, onNewSession, onNewStudent, branchFi
 }
 
 function AdminOverview({ students, sessions, coaches, branchFilter }) {
-  const [selectedMonth, setSelectedMonth] = useState(TODAY_ISO.slice(0,7));
+  const [selectedMonth, setSelectedMonth] = useState(todayIso().slice(0,7));
   const monthSessions = sessions.filter(s => s.date.startsWith(selectedMonth));
   const enrolled = students.filter(isEnrolled);
   const totalStudents = uniqueChildren(students.filter(s => !isArchived(s)));
@@ -1936,7 +1959,7 @@ function AdminCoachDetail({ coach, students:allStudents, rosterStudents = allStu
                 <span className="attention-dot" style={{ background: st.color }} />
                 <div className="admin-student-mini-name">
                   {s.name}
-                  {(s.origin || "regular") === "promo" && <Star size={11} color="#FFC24B" />}
+                  {(s.origin || "regular") === "promo" && <Star size={11} color="var(--crm-amber)" />}
                 </div>
                 <div className="admin-student-mini-meta">{formatAttendance(s.attendance)} посещение · {st.label}</div>
                 {onQuickUpdateStudent && (s.origin || "regular") === "promo" && s.status !== "left" && (
@@ -1984,9 +2007,9 @@ function AdminManagers({ managers, currentManagerId, onNewManager, onEditManager
           const isOwner = m.role === "owner";
           const isSelf = m.id === currentManagerId;
           return (
-            <div className="coach-admin-card" key={m.id} style={{ "--accent": "#3DA5FF" }}>
+            <div className="coach-admin-card" key={m.id} style={{ "--accent": "var(--crm-blue)" }}>
               <div className="coach-admin-top">
-                <div className="coach-admin-avatar" style={{ background: "#3DA5FF" }}>{m.avatar}</div>
+                <div className="coach-admin-avatar" style={{ background: "var(--crm-blue)" }}>{m.avatar}</div>
                 <div className="coach-admin-top-right">
                   {isSelf && <span className="coach-admin-disc-tag">ВЫ</span>}
                   <div className="table-actions">
@@ -2006,7 +2029,7 @@ function AdminManagers({ managers, currentManagerId, onNewManager, onEditManager
               <div className="coach-admin-name">{m.name}</div>
               <div className="coach-admin-meta">{m.email}</div>
               <div className="coach-admin-branches">
-                <span className="grade-badge" style={{ background: "rgba(61,165,255,.15)", color: "#3DA5FF" }}>
+                <span className="grade-badge" style={{ background: "rgba(61,165,255,.15)", color: "var(--crm-blue)" }}>
                   {isOwner ? "Владелец" : "Администратор филиала"}
                 </span>
                 {m.branches.map(bId => (
@@ -2056,8 +2079,8 @@ function AdminStudents({ searchQ, students, coaches, filterCoaches, onEdit, onDe
                 <tr key={s.id}>
                   <td className="table-name-cell"><div className="table-name-content">
                     <span>{s.name}</span>
-                    {s.flag === "injury" && <AlertCircle size={13} color="#FF5454" />}
-                    {(s.origin || "regular") === "promo" && <Star size={12} color="#FFC24B" />}
+                    {s.flag === "injury" && <AlertCircle size={13} color="var(--crm-danger)" />}
+                    {(s.origin || "regular") === "promo" && <Star size={12} color="var(--crm-amber)" />}
                   </div></td>
                   <td>{s.age ?? "Не указан"}</td>
                   <td><span className="table-branch-tag" style={{ color: b.color, borderColor: b.color }}>{b.label}</span></td>
@@ -2071,7 +2094,7 @@ function AdminStudents({ searchQ, students, coaches, filterCoaches, onEdit, onDe
                         value={s.status || "active"}
                         onChange={(e) => {
                           const next = e.target.value;
-                          if (next === "left") onQuickUpdateStudent(s.id, { status: "left", leftDate: TODAY_ISO });
+                          if (next === "left") onQuickUpdateStudent(s.id, { status: "left", leftDate: todayIso() });
                           else onQuickUpdateStudent(s.id, { status: next });
                         }}
                       >
@@ -2111,7 +2134,7 @@ function AdminSchedule({ versions, sessions, coaches, students, onEdit, onDelete
   const canConduct = !readOnly && Boolean(onSaveAttendance);
   function openSession(id, conduct = false) {setOpenedId(id);setConducting(conduct);}
   const visibleSessions = sessions.filter(s => coachFilter === "all" || s.coachId === coachFilter);
-  const [selectedDate, setSelectedDate] = useState(TODAY_ISO);
+  const [selectedDate, setSelectedDate] = useCalendarSelection();
   const [showAll, setShowAll] = useState(false);
   const markedDates = useMemo(() => new Set(visibleSessions.map(s => s.date)), [sessions, coachFilter]);
 
@@ -2220,7 +2243,7 @@ function AdminHelpTab() {
   return (
     <div className="admin-page">
       <div className="panel help-admin-intro">
-        <span className="help-intro-tag" style={{ color: "#3DA5FF", borderColor: "#3DA5FF" }}>ПАМЯТКА ВЛАДЕЛЬЦА</span>
+        <span className="help-intro-tag" style={{ color: "var(--crm-blue)", borderColor: "var(--crm-blue)" }}>ПАМЯТКА ВЛАДЕЛЬЦА</span>
         <p>Эта панель даёт полную картину по обоим филиалам: кто тренирует, кто занимается, насколько загружены залы и где есть проблемы с посещаемостью. Ниже — что находится в каждом разделе и как быстрее найти нужное.</p>
       </div>
 
@@ -2264,7 +2287,7 @@ function AdminHelpTab() {
    ============================================================ */
 function AdminLoads({ branchFilter, students, sessions }) {
   const branchIds = branchFilter === "all" ? Object.keys(BRANCHES) : [branchFilter];
-  const statsByBranch = Object.fromEntries(branchIds.map(b => [b, weekStats(sessions.filter(s => s.branchId === b), TODAY_ISO)]));
+  const statsByBranch = Object.fromEntries(branchIds.map(b => [b, weekStats(sessions.filter(s => s.branchId === b), todayIso())]));
   const maxWeek = Math.max(1, ...branchIds.flatMap(b => statsByBranch[b].map(w => w.count)));
 
   const totalWeek = (bId) => statsByBranch[bId].reduce((a, w) => a + w.count, 0);
@@ -2315,7 +2338,7 @@ function AdminLoads({ branchFilter, students, sessions }) {
                     <div className="disc-dist-row" key={discKey}>
                       <div className="disc-dist-label"><DisciplineGlyph d={discKey} size={14} />{d.label}</div>
                       <div className="disc-dist-track">
-                        <div className="disc-dist-fill" style={{ width: `${pct}%`, background: stats.requiresAttention ? "#FF5454" : d.color }} />
+                        <div className="disc-dist-fill" style={{ width: `${pct}%`, background: stats.requiresAttention ? "var(--crm-danger)" : d.color }} />
                       </div>
                       <div className="disc-dist-count">{formatAttendance(pct)}</div>
                     </div>
@@ -2358,7 +2381,7 @@ function AdminLoads({ branchFilter, students, sessions }) {
 function AdminSalary({ coaches, sessions, branchFilter }) {
   // Доступные месяцы из данных сессий
   const months = [...new Set(sessions.map(s => s.date.slice(0, 7)))].sort().reverse();
-  const [selectedMonth, setSelectedMonth] = useState(TODAY_ISO.slice(0,7));
+  const [selectedMonth, setSelectedMonth] = useState(todayIso().slice(0,7));
 
   const monthLabel = monthLabelFull;
 
@@ -2553,7 +2576,7 @@ function SessionModal({ coaches, students, sessions = [], defaultCoachId, defaul
     (defaultBranchId && coach.branches.includes(defaultBranchId) ? defaultBranchId : coach.branches[0])
   );
   const [type, setType] = useState(initialSession?.type || "group");
-  const [date, setDate] = useState(initialSession?.date || TODAY_ISO);
+  const [date, setDate] = useState(initialSession?.date || todayIso());
   const [time, setTime] = useState(initialSession?.time || "16:00");
   const [groupName, setGroupName] = useState(initialSession?.groupName || "");
   const [nameEdited, setNameEdited] = useState(Boolean(initialSession));
@@ -2568,7 +2591,7 @@ function SessionModal({ coaches, students, sessions = [], defaultCoachId, defaul
 
   // Режим "Регулярная" — расписание из нескольких слотов (день недели + время), повторяется по неделям
   const [slots, setSlots] = useState([{ weekday: 0, time: "16:00" }]);
-  const [startDate, setStartDate] = useState(TODAY_ISO);
+  const [startDate, setStartDate] = useState(()=>todayIso());
   const [weeksAhead, setWeeksAhead] = useState(8);
 
   const pool = students
@@ -2745,7 +2768,7 @@ function SessionModal({ coaches, students, sessions = [], defaultCoachId, defaul
                 <label key={s.id} className="picker-row">
                   <input type="checkbox" checked={studentIds.includes(s.id)} onChange={() => toggleStudent(s.id)} />
                   <span className="picker-check" style={{ background: studentIds.includes(s.id) ? disc.color : "transparent" }}>
-                    {studentIds.includes(s.id) && <CheckCircle2 size={12} color="#16181C" />}
+                    {studentIds.includes(s.id) && <CheckCircle2 size={12} color="var(--crm-surface)" />}
                   </span>
                   <span className="picker-name">{s.name}</span>
                   <span className="picker-meta">{s.level}</span>
@@ -2806,7 +2829,7 @@ function StudentModal({ coaches, students, defaultCoachId, defaultBranchId, init
 
   function addComment() {
     if (!commentDraft.trim()) return;
-    setComments(prev => [{ id: STORAGE ? crypto.randomUUID() : `cm${Date.now()}`, date: TODAY_ISO, text: commentDraft.trim() }, ...prev]);
+    setComments(prev => [{ id: STORAGE ? crypto.randomUUID() : `cm${Date.now()}`, date: todayIso(), text: commentDraft.trim() }, ...prev]);
     setCommentDraft("");
   }
   function removeComment(id) {
@@ -2945,11 +2968,39 @@ function FormField({ label, children }) {
 /* ============================================================
    ДИАЛОГ ПОДТВЕРЖДЕНИЯ УДАЛЕНИЯ
    ============================================================ */
+function SessionDeleteDialog({anchor,sessions,versions,onCancel,onConfirm}) {
+  const [draft]=useState(()=>({anchor,sessions,versions}));
+  const [scope,setScope]=useState(draft.anchor?.templateId && hasSessionHistory(draft.anchor)?'series':'single');
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  if(!draft.anchor)return <AlertDialog text="Занятие больше недоступно. Обновите расписание." onClose={onCancel}/>;
+  const {deletable,preserved}=seriesSelection(draft.sessions,draft.anchor,scope);
+  async function submit(){
+    if(busy || !deletable.length)return;
+    setBusy(true);setError('');
+    try{await onConfirm({id:draft.anchor.id,scope,sessionIds:deletable.map(s=>s.id),__expected:draft.versions});}
+    catch(e){setError(e.message);}finally{setBusy(false);}
+  }
+  return <div className="modal-overlay" onClick={busy?undefined:onCancel}><div className="confirm-card" role="dialog" aria-modal="true" aria-label="Удаление тренировок" onClick={e=>e.stopPropagation()}>
+    <div className="confirm-title">Удаление тренировок</div>
+    <div className="confirm-text">{draft.anchor.groupName} · {formatDate(draft.anchor.date)} · {draft.anchor.time}</div>
+    <div className="series-delete-options">
+      {[["single","Только эта тренировка"],...(draft.anchor.templateId?[["series","Вся серия"],["following","Эта и следующие тренировки серии"]]:[])].map(([value,label])=><label key={value}>
+        <input type="radio" name="delete-scope" value={value} checked={scope===value} disabled={busy} onChange={()=>setScope(value)}/>{label}
+      </label>)}
+    </div>
+    <div className="confirm-text">Будет удалено: <strong>{deletable.length}</strong>. Сохранятся занятия с историей: <strong>{preserved.length}</strong>.</div>
+    <div className="form-hint">Удаляются только непроведённые занятия без отметок и результатов. Проведённые, пропуски, посещаемость и начисления сохраняются. Удаление нельзя отменить.</div>
+    {error&&<div className="form-error" role="alert">{error}</div>}
+    <div className="confirm-actions"><button className="modal-btn-secondary" disabled={busy} onClick={onCancel}>Отмена</button>
+      <button className="confirm-btn-danger" disabled={busy||!deletable.length} onClick={submit}>{busy?'Удаление…':`Удалить: ${deletable.length}`}</button></div>
+  </div></div>;
+}
+
 function ConfirmDialog({ label, archive = false, onCancel, onConfirm }) {
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="confirm-card" onClick={e => e.stopPropagation()}>
-        <div className="confirm-icon"><AlertCircle size={22} color="#FF5454" /></div>
+        <div className="confirm-icon"><AlertCircle size={22} color="var(--crm-danger)" /></div>
         <div className="confirm-title">{archive ? "Перенести ученика в архив?" : "Удалить запись?"}</div>
         <div className="confirm-text">{archive ? `${label} исчезнет из текущих списков и выбора новых тренировок. Составы уже созданных занятий, посещаемость и результаты сохранятся. Ученика можно восстановить из архива.` : `Ты собираешься удалить ${label}. Это действие нельзя отменить.`}</div>
         <div className="confirm-actions">
@@ -2968,11 +3019,11 @@ function AlertDialog({ text, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="confirm-card" onClick={e => e.stopPropagation()}>
-        <div className="confirm-icon"><AlertCircle size={22} color="#FFC83D" /></div>
+        <div className="confirm-icon"><AlertCircle size={22} color="var(--crm-skate)" /></div>
         <div className="confirm-title">Действие невозможно</div>
         <div className="confirm-text">{text}</div>
         <div className="confirm-actions">
-          <button className="modal-btn-primary" style={{ background: "#EDEFF2" }} onClick={onClose}>Понятно</button>
+          <button className="modal-btn-primary" style={{ background: "var(--crm-text)" }} onClick={onClose}>Понятно</button>
         </div>
       </div>
     </div>
@@ -3144,7 +3195,7 @@ function CoachModal({ initialCoach, existingCoaches, managers, onClose, onSave, 
               <label key={k} className="picker-row">
                 <input type="checkbox" checked={branches.includes(k)} onChange={() => toggleBranch(k)} />
                 <span className="picker-check" style={{ background: branches.includes(k) ? b.color : "transparent" }}>
-                  {branches.includes(k) && <CheckCircle2 size={12} color="#16181C" />}
+                  {branches.includes(k) && <CheckCircle2 size={12} color="var(--crm-surface)" />}
                 </span>
                 <span className="picker-name">{b.label}</span>
               </label>
@@ -3223,7 +3274,7 @@ function ManagerModal({ initialManager, existingManagers, coaches, onClose, onSa
   if (pendingPayload) {
     const loginText = `Почта: ${pendingPayload.email}\nПароль: ${pendingPayload.password}`;
     return (
-      <ModalShell onClose={onClose} accent="#3DA5FF">
+      <ModalShell onClose={onClose} accent="var(--crm-blue)">
         <div className="modal-header">
           <div className="modal-title"><CheckCircle2 size={16} /> Администратор добавлен</div>
           <button className="modal-close" aria-label="Закрыть" onClick={onClose}><X size={18} /></button>
@@ -3239,7 +3290,7 @@ function ManagerModal({ initialManager, existingManagers, coaches, onClose, onSa
           </button>
         </div>
         <div className="modal-footer">
-          <button className="modal-btn-primary" style={{ background: "#3DA5FF" }} onClick={() => onSave(pendingPayload)}>
+          <button className="modal-btn-primary" style={{ background: "var(--crm-blue)" }} onClick={() => onSave(pendingPayload)}>
             Готово
           </button>
         </div>
@@ -3248,7 +3299,7 @@ function ManagerModal({ initialManager, existingManagers, coaches, onClose, onSa
   }
 
   return (
-    <ModalShell onClose={onClose} accent="#3DA5FF">
+    <ModalShell onClose={onClose} accent="var(--crm-blue)">
       <div className="modal-header">
         <div className="modal-title"><Settings size={16} /> {isEditing ? "Редактирование администратора" : "Новый администратор"}</div>
         <button className="modal-close" aria-label="Закрыть" onClick={onClose}><X size={18} /></button>
@@ -3296,7 +3347,7 @@ function ManagerModal({ initialManager, existingManagers, coaches, onClose, onSa
                 <label key={k} className="picker-row">
                   <input type="radio" name="manager-branch" checked={singleBranch === k} onChange={() => setSingleBranch(k)} />
                   <span className="picker-check" style={{ background: singleBranch === k ? b.color : "transparent" }}>
-                    {singleBranch === k && <CheckCircle2 size={12} color="#16181C" />}
+                    {singleBranch === k && <CheckCircle2 size={12} color="var(--crm-surface)" />}
                   </span>
                   <span className="picker-name">{b.label}</span>
                 </label>
@@ -3310,7 +3361,7 @@ function ManagerModal({ initialManager, existingManagers, coaches, onClose, onSa
 
       <div className="modal-footer">
         <button className="modal-btn-secondary" onClick={onClose}>Отмена</button>
-        <button className="modal-btn-primary" style={{ background: "#3DA5FF" }} onClick={handleSave}>{isEditing ? "Сохранить изменения" : "Добавить администратора"}</button>
+        <button className="modal-btn-primary" style={{ background: "var(--crm-blue)" }} onClick={handleSave}>{isEditing ? "Сохранить изменения" : "Добавить администратора"}</button>
       </div>
     </ModalShell>
   );
@@ -4323,3 +4374,5 @@ button.disc-pill:hover { border-color: #3A3F4A; color: #8A8F99; }
 .salary-breakdown-meta { font-size: 11px; color: #8A8F99; margin-top: 2px; }
 .salary-breakdown-amount { flex-shrink: 0; font-size: 13px; font-weight: 700; color: #3DDC97; font-family: 'JetBrains Mono', monospace; }
 `;
+
+const THEMED_CSS = themedCss(CSS);

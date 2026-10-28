@@ -34,11 +34,12 @@ export function fromSnapshot(raw, authUserId) {
   return {school:{schemaVersion:2,students,sessions,migrationIssues:[]},coaches,managers,user:identities[0],authUserId};
 }
 const names = {childId:'child_id',coachId:'coach_id',branchId:'branch_id',studentIds:'student_ids',groupName:'group_name',
+  sessionIds:'session_ids',
   templateId:'template_id',joinDate:'join_date',leftDate:'left_date',archivedAt:'archived_at',promoResults:'promo_results'};
 // Only explicitly allowed input fields cross the API. No password, role spoofing, history or auto-status marker.
-const allowed = new Set(['id','name','age','discipline','coachId','branchId','level','childId','comments','joinDate','status','origin','flag',
+const allowed = new Set(['id','name','age','discipline','coachId','branchId','level','phone','childId','comments','joinDate','status','origin','flag',
   'leftDate','archivedAt','type','date','time','duration','groupName','studentIds','note','templateId','attendance','promoResults',
-  'email','disciplines','exp','grade','branches','role','sessions']);
+  'email','disciplines','exp','grade','branches','role','sessions','scope','sessionIds']);
 export function toPayload(payload) {
   return Object.fromEntries(Object.entries(payload).filter(([key,value]) => allowed.has(key) && value!==undefined).map(([key,value]) =>
     [names[key] || key,key==='sessions' ? value.map(toPayload) : key==='comments' ? value.map(c => copy(c,['id','date','text'])) : value]));
